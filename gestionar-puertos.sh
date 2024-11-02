@@ -1,80 +1,66 @@
 #!/bin/bash
 
-# Verificar si UFW está instalado
-if ! command -v ufw &> /dev/null; then
-    echo "UFW no está instalado. Instalando UFW..."
-    sudo apt-get install ufw -y
-fi
+LOG_FILE="puertos_log.txt"
 
-# Activar UFW si no está activo
-if [[ $(sudo ufw status | grep -i "inactive") ]]; then
-    echo "Activando UFW..."
-    sudo ufw enable
-fi
+function check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "Este script necesita permisos de superusuario. Ejecuta con sudo."
+        exit 1
+    fi
+}
 
-# Definir puertos que pueden ser vulnerables a ataques
-vulnerable_ports=(21 23 25 110 143 445 465 587 993 995 2049 3306 3389 5900 8080)
+function log_action() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
 
-# Función para abrir o cerrar un puerto
-manage_ports() {
-    action=$1  # "allow" o "deny"
-    for port in "${vulnerable_ports[@]}"; do
-        echo "¿Deseas $action el puerto $port? (s/n)"
-        read -r response
-        if [[ $response == "s" ]]; then
-            if [[ $action == "allow" ]]; then
-                echo "Abriendo puerto $port..."
-                sudo ufw allow $port
-            else
-                echo "Cerrando puerto $port..."
-                sudo ufw deny $port
-            fi
+function is_port_open() {
+    ufw status | grep -q "$1.*ALLOW"
+}
+
+function open_port() {
+    if is_port_open "$1"; then
+        echo "El puerto $1 ya está abierto."
+    else
+        ufw allow "$1"
+        echo "Puerto $1 abierto."
+        log_action "Puerto $1 abierto"
+    fi
+}
+
+function close_port() {
+    if ! is_port_open "$1"; then
+        echo "El puerto $1 ya está cerrado."
+    else
+        ufw deny "$1"
+        echo "Puerto $1 cerrado."
+        log_action "Puerto $1 cerrado"
+    fi
+}
+
+function manage_ports() {
+    read -p "Ingresa los puertos a gestionar (separados por comas): " ports
+    read -p "Abrir (a) o cerrar (c) los puertos? " action
+
+    IFS=',' read -r -a port_array <<< "$ports"
+
+    for port in "${port_array[@]}"; do
+        if [[ ! $port =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+            echo "El puerto $port no es válido. Debe ser un número entre 1 y 65535."
+            continue
+        fi
+
+        if [[ "$action" == "a" ]]; then
+            open_port "$port"
+        elif [[ "$action" == "c" ]]; then
+            close_port "$port"
+        else
+            echo "Opción no válida. Usa 'a' para abrir o 'c' para cerrar."
+            exit 1
         fi
     done
 }
 
-# Función para gestionar el tiempo de cierre de puertos
-manage_time() {
-    echo "¿Quieres cerrar los puertos por un tiempo limitado? (s/n)"
-    read -r timed_choice
-    if [[ $timed_choice == "s" ]]; then
-        echo "Introduce el tiempo en segundos para mantener los puertos cerrados:"
-        read -r seconds
-        echo "Los puertos permanecerán cerrados durante $seconds segundos."
-        sleep "$seconds"
-        echo "Reabriendo puertos vulnerables..."
-        manage_ports "allow"
-    else
-        echo "Los puertos permanecerán cerrados hasta que los reabras manualmente."
-    fi
-}
-
-# Menú para el usuario
-while true; do
-    echo "Elija una opción:"
-    echo "1. Cerrar puertos vulnerables"
-    echo "2. Abrir puertos vulnerables"
-    echo "3. Salir"
-    read -r option
-
-    case $option in
-        1)
-            manage_ports "deny"
-            manage_time
-            ;;
-        2)
-            manage_ports "allow"
-            ;;
-        3)
-            echo "Saliendo..."
-            break
-            ;;
-        *)
-            echo "Opción no válida, por favor elige 1, 2 o 3."
-            ;;
-    esac
-done
-
-# Mostrar el estado final de UFW
-echo "Estado de UFW:"
-sudo ufw status verbose
+# Ejecutar el script con verificación de permisos
+check_root
+manage_ports
+ufw reload
