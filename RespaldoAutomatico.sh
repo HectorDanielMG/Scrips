@@ -1,25 +1,53 @@
 #!/bin/bash
-# Script para realizar respaldo automático
 
-# Variables
-DIR_ORIGEN=${1:-"/ruta/al/directorio"}  # Directorio a respaldar (argumento 1)
-DIR_DESTINO=${2:-"/ruta/al/respaldo"}  # Directorio de respaldo (argumento 2)
-NOMBRE_RESPALDO="respaldo_$(date +%Y%m%d_%H%M%S).tar.gz"  # Nombre del archivo de respaldo
+# Archivo de registro para registrar la actividad
+LOG_FILE="respaldo_automatico.log"
 
-# Crear respaldo
-echo "Creando respaldo del directorio $DIR_ORIGEN en $DIR_DESTINO/$NOMBRE_RESPALDO"
-tar -czvf "$DIR_DESTINO/$NOMBRE_RESPALDO" "$DIR_ORIGEN"
+# Función para verificar si se ejecuta con permisos de superusuario
+function check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "Este script necesita permisos de superusuario. Ejecuta con sudo."
+        exit 1
+    fi
+}
 
-if [[ $? -eq 0 ]]; then
-  echo "Respaldo completado exitosamente."
-else
-  echo "Hubo un error al crear el respaldo."
-fi
+# Función para registrar acciones en el archivo de log
+function log_action() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
 
-# Limpiar respaldos antiguos (opcional, deja solo los últimos 5 respaldos)
-echo "¿Desea eliminar respaldos antiguos y dejar solo los 5 más recientes? (y/n)"
-read -r respuesta
-if [[ $respuesta == "y" ]]; then
-  ls -tp "$DIR_DESTINO"/*.tar.gz | grep -v '/$' | tail -n +6 | xargs -I {} rm -- {}
-  echo "Respaldos antiguos eliminados."
-fi
+# Función para realizar el respaldo
+function make_backup() {
+    # Configuración del directorio de origen y destino
+    read -p "Directorio de origen para el respaldo: " source_dir
+    read -p "Directorio de destino para almacenar el respaldo: " backup_dir
+    mkdir -p "$backup_dir"
+
+    # Nombre del archivo de respaldo con fecha
+    backup_file="$backup_dir/backup_$(date '+%Y%m%d_%H%M%S').tar.gz"
+
+    # Compresión y respaldo
+    tar -czf "$backup_file" "$source_dir" &>/dev/null
+
+    # Verificar éxito de respaldo
+    if [[ $? -eq 0 ]]; then
+        echo "Respaldo completado exitosamente en: $backup_file"
+        log_action "Respaldo exitoso: $backup_file"
+    else
+        echo "Error al crear el respaldo."
+        log_action "Error al crear el respaldo de $source_dir"
+    fi
+}
+
+# Función para agendar respaldos automáticos
+function schedule_backup() {
+    read -p "Frecuencia en minutos para el respaldo automático: " frequency
+    cron_cmd="*/$frequency * * * * /bin/bash $(realpath "$0") >> $(realpath "$LOG_FILE") 2>&1"
+    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+    echo "Respaldo automático programado cada $frequency minutos."
+    log_action "Respaldo automático programado cada $frequency minutos"
+}
+
+check_root
+make_backup
+schedule_backup
