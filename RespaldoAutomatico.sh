@@ -1,53 +1,53 @@
 #!/bin/bash
+# Script avanzado para monitorear el sistema
 
-# Archivo de registro para registrar la actividad
-LOG_FILE="respaldo_automatico.log"
+echo "=== Monitoreo del sistema ==="
+echo "Fecha y hora: $(date)"
+echo "=============================="
 
-# Función para verificar si se ejecuta con permisos de superusuario
-function check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        echo "Este script necesita permisos de superusuario. Ejecuta con sudo."
-        exit 1
-    fi
-}
+# Uso de CPU
+echo -e "\nUso de CPU:"
+cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')
+echo "CPU: $cpu_usage%"
 
-# Función para registrar acciones en el archivo de log
-function log_action() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
-}
+# Temperatura de la CPU (requiere 'sensors' instalado)
+if command -v sensors &> /dev/null; then
+  echo -e "\nTemperatura de la CPU:"
+  sensors | grep -E '^(Package id|Core|temp1)' | awk '{print $1 ": " $2}'
+else
+  echo -e "\nTemperatura de la CPU: No disponible (instala 'sensors' para habilitar)"
+fi
 
-# Función para realizar el respaldo
-function make_backup() {
-    # Configuración del directorio de origen y destino
-    read -p "Directorio de origen para el respaldo: " source_dir
-    read -p "Directorio de destino para almacenar el respaldo: " backup_dir
-    mkdir -p "$backup_dir"
+# Uso de memoria
+echo -e "\nUso de Memoria:"
+free -h | awk '/Mem/ {print "Memoria usada: " $3 " / " $2}'
+free -h | awk '/Swap/ {print "Swap usada: " $3 " / " $2}'
 
-    # Nombre del archivo de respaldo con fecha
-    backup_file="$backup_dir/backup_$(date '+%Y%m%d_%H%M%S').tar.gz"
+# Espacio en disco
+echo -e "\nEspacio en disco:"
+df -h | grep '^/dev/' | awk '{print $1 ": " $3 " usado de " $2 " (" $5 " lleno)"}'
 
-    # Compresión y respaldo
-    tar -czf "$backup_file" "$source_dir" &>/dev/null
+# Monitorizar servicios importantes (SSH, Apache2, y otros configurables)
+echo -e "\nEstado de servicios importantes:"
+services=("ssh" "apache2" "mysql") # Añadir servicios adicionales aquí
+for service in "${services[@]}"; do
+  if systemctl is-active --quiet $service; then
+    echo "$service está corriendo."
+  else
+    echo "$service no está corriendo."
+  fi
+done
 
-    # Verificar éxito de respaldo
-    if [[ $? -eq 0 ]]; then
-        echo "Respaldo completado exitosamente en: $backup_file"
-        log_action "Respaldo exitoso: $backup_file"
-    else
-        echo "Error al crear el respaldo."
-        log_action "Error al crear el respaldo de $source_dir"
-    fi
-}
+# Actividad de red
+echo -e "\nActividad de red:"
+if command -v ifstat &> /dev/null; then
+  ifstat -i $(ip route | grep '^default' | awk '{print $5}') 1 1 | tail -1
+else
+  echo "Herramienta ifstat no disponible. Instálala para ver detalles de red."
+fi
 
-# Función para agendar respaldos automáticos
-function schedule_backup() {
-    read -p "Frecuencia en minutos para el respaldo automático: " frequency
-    cron_cmd="*/$frequency * * * * /bin/bash $(realpath "$0") >> $(realpath "$LOG_FILE") 2>&1"
-    (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
-    echo "Respaldo automático programado cada $frequency minutos."
-    log_action "Respaldo automático programado cada $frequency minutos"
-}
+# Procesos con mayor uso de CPU y memoria
+echo -e "\nProcesos con mayor uso de CPU y memoria:"
+ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -10
 
-check_root
-make_backup
-schedule_backup
+echo -e "\nMonitoreo completo."
