@@ -1,66 +1,53 @@
 #!/bin/bash
 
-LOG_FILE="puertos_log.txt"
+# Script de Gestión de Puertos
 
-function check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        echo "Este script necesita permisos de superusuario. Ejecuta con sudo."
-        exit 1
-    fi
-}
+echo "=== Gestión de Puertos ==="
+echo "Seleccione una opción:"
+echo "1. Verificar el estado de un puerto"
+echo "2. Abrir un puerto (requiere privilegios de superusuario)"
+echo "3. Cerrar un puerto (requiere privilegios de superusuario)"
+echo "4. Listar servicios que utilizan puertos específicos"
+echo "5. Salir"
 
-function log_action() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
-}
+read -p "Ingrese su elección [1-5]: " choice
 
-function is_port_open() {
-    ufw status | grep -q "$1.*ALLOW"
-}
-
-function open_port() {
-    if is_port_open "$1"; then
-        echo "El puerto $1 ya está abierto."
+# Función para verificar el estado de un puerto
+function verificar_puerto {
+    read -p "Ingrese el número de puerto a verificar: " port
+    if sudo lsof -i :$port >/dev/null; then
+        echo "El puerto $port está en uso."
     else
-        ufw allow "$1"
-        echo "Puerto $1 abierto."
-        log_action "Puerto $1 abierto"
+        echo "El puerto $port está libre."
     fi
 }
 
-function close_port() {
-    if ! is_port_open "$1"; then
-        echo "El puerto $1 ya está cerrado."
-    else
-        ufw deny "$1"
-        echo "Puerto $1 cerrado."
-        log_action "Puerto $1 cerrado"
-    fi
+# Función para abrir un puerto (requiere privilegios de superusuario)
+function abrir_puerto {
+    read -p "Ingrese el número de puerto a abrir: " port
+    sudo ufw allow $port
+    echo "El puerto $port ha sido abierto."
 }
 
-function manage_ports() {
-    read -p "Ingresa los puertos a gestionar (separados por comas): " ports
-    read -p "Abrir (a) o cerrar (c) los puertos? " action
-
-    IFS=',' read -r -a port_array <<< "$ports"
-
-    for port in "${port_array[@]}"; do
-        if [[ ! $port =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
-            echo "El puerto $port no es válido. Debe ser un número entre 1 y 65535."
-            continue
-        fi
-
-        if [[ "$action" == "a" ]]; then
-            open_port "$port"
-        elif [[ "$action" == "c" ]]; then
-            close_port "$port"
-        else
-            echo "Opción no válida. Usa 'a' para abrir o 'c' para cerrar."
-            exit 1
-        fi
-    done
+# Función para cerrar un puerto (requiere privilegios de superusuario)
+function cerrar_puerto {
+    read -p "Ingrese el número de puerto a cerrar: " port
+    sudo ufw deny $port
+    echo "El puerto $port ha sido cerrado."
 }
 
-# Ejecutar el script con verificación de permisos
-check_root
-manage_ports
-ufw reload
+# Función para listar servicios que utilizan puertos específicos
+function listar_servicios {
+    echo "Listado de puertos en uso y sus servicios:"
+    sudo lsof -i -P -n | grep LISTEN
+}
+
+# Ejecución de la opción seleccionada
+case $choice in
+    1) verificar_puerto ;;
+    2) abrir_puerto ;;
+    3) cerrar_puerto ;;
+    4) listar_servicios ;;
+    5) echo "Saliendo..." ;;
+    *) echo "Opción no válida. Por favor, seleccione una opción entre 1 y 5." ;;
+esac
